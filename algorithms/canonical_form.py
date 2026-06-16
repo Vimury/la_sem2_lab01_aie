@@ -8,7 +8,7 @@
 from core.tt_tensor import TTTensor
 from core.dense_tensor import DenseTensor
 from processor_type.interface import BackendInterface
-from core.linalg import qr, matmul, transpose
+from core.linalg import qr, matmul, transpose, svd
 
 
 def left_canonicalize(tt: TTTensor, backend: BackendInterface) -> TTTensor:
@@ -24,17 +24,35 @@ def left_canonicalize(tt: TTTensor, backend: BackendInterface) -> TTTensor:
         core = cores[k]
         r_prev, n_k, r_curr = core.shape
 
-        unfolded = core.reshape((r_prev * n_k, r_curr))
-        Q, R = qr(unfolded)
+        if r_prev * n_k >= r_curr:
+            unfolded = core.reshape((r_prev * n_k, r_curr))
+            Q, R = qr(unfolded)
+            cores[k] = Q.reshape((r_prev, n_k, r_curr))
 
-        cores[k] = Q.reshape((r_prev, n_k, r_curr))
+            next_core = cores[k + 1]
+            r_curr_next, n_next, r_next = next_core.shape
+            next_core_2d = next_core.reshape((r_curr, n_next * r_next))
+            new_next_core_2d = matmul(R, next_core_2d)
+            cores[k + 1] = new_next_core_2d.reshape((r_curr, n_next, r_next))
+        else:
+            unfolded = core.reshape((r_prev * n_k, r_curr))
+            U, S, Vt = svd(unfolded, full_matrices=False)
 
-        next_core = cores[k + 1]
-        r_curr_next, n_next, r_next = next_core.shape
+            m = r_prev * n_k
+            R_data = []
+            for i in range(m):
+                s_val = S.data[i]
+                for j in range(r_curr):
+                    R_data.append(s_val * Vt.data[i * r_curr + j])
+            R = DenseTensor((m, r_curr), data=R_data)
 
-        next_core_2d = next_core.reshape((r_curr, n_next * r_next))
-        new_next_core_2d = matmul(R, next_core_2d)
-        cores[k + 1] = new_next_core_2d.reshape((r_curr, n_next, r_next))
+            cores[k] = U.reshape((r_prev, n_k, m))
+
+            next_core = cores[k + 1]
+            r_curr_next, n_next, r_next = next_core.shape
+            next_core_2d = next_core.reshape((r_curr, n_next * r_next))
+            new_next_core_2d = matmul(R, next_core_2d)
+            cores[k + 1] = new_next_core_2d.reshape((m, n_next, r_next))
 
     return TTTensor(cores)
 
@@ -52,22 +70,41 @@ def right_canonicalize(tt: TTTensor, backend: BackendInterface) -> TTTensor:
         core = cores[k]
         r_prev, n_k, r_curr = core.shape
 
-        unfolded = core.reshape((r_prev, n_k * r_curr))
+        if r_prev <= n_k * r_curr:
+            unfolded = core.reshape((r_prev, n_k * r_curr))
+            unfolded_T = transpose(unfolded)
+            Q_qr, R_qr = qr(unfolded_T)
+            R = transpose(R_qr)
+            Q = transpose(Q_qr)
+            cores[k] = Q.reshape((r_prev, n_k, r_curr))
 
-        unfolded_T = transpose(unfolded)
-        Q_qr, R_qr = qr(unfolded_T)
+            prev_core = cores[k - 1]
+            r_prev2, n_prev, r_prev1 = prev_core.shape
+            prev_core_2d = prev_core.reshape((n_prev * r_prev2, r_prev1))
+            new_prev_core_2d = matmul(prev_core_2d, R)
+            cores[k - 1] = new_prev_core_2d.reshape((r_prev2, n_prev, r_prev1))
+        else:
+            unfolded = core.reshape((r_prev, n_k * r_curr))
+            U, S, Vt = svd(unfolded, full_matrices=False)
 
-        R = transpose(R_qr)
-        Q = transpose(Q_qr)
+            m = r_prev
+            n_rank = n_k * r_curr
+            R_rq_data = []
+            for i in range(m):
+                s_val = S.data[i]
+                for j in range(n_rank):
+                    R_rq_data.append(U.data[i * n_rank + j] * s_val)
+            R_rq = DenseTensor((m, n_rank), data=R_rq_data)
 
-        cores[k] = Q.reshape((r_prev, n_k, r_curr))
+            Q_rq = Vt
 
-        prev_core = cores[k - 1]
-        r_prev2, n_prev, r_prev1 = prev_core.shape
+            cores[k] = Q_rq.reshape((n_rank, n_k, r_curr))
 
-        prev_core_2d = prev_core.reshape((n_prev * r_prev2, r_prev1))
-        new_prev_core_2d = matmul(prev_core_2d, R)
-        cores[k - 1] = new_prev_core_2d.reshape((r_prev2, n_prev, r_prev1))
+            prev_core = cores[k - 1]
+            r_prev2, n_prev, r_prev1 = prev_core.shape
+            prev_core_2d = prev_core.reshape((n_prev * r_prev2, r_prev1))
+            new_prev_core_2d = matmul(prev_core_2d, R_rq)
+            cores[k - 1] = new_prev_core_2d.reshape((r_prev2, n_prev, n_rank))
 
     return TTTensor(cores)
 
