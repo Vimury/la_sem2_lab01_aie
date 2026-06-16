@@ -10,6 +10,7 @@ from core.tt_tensor import TTTensor
 from core.dense_tensor import DenseTensor
 from processor_type.interface import BackendInterface
 from algorithms.canonical_form import right_canonicalize
+from core.linalg import svd, matmul
 
 
 def tt_round(

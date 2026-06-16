@@ -123,28 +123,34 @@ class DenseTensor:
             nested: список
         """
 
-        def get_shape(lst):
-            if not isinstance(lst, list):
+        def get_shape(obj):
+            if not isinstance(obj, (list, tuple)):
                 return []
-            if not lst:
-                return [0]
-            sub_shape = get_shape(lst[0])
-            if not all(
-                    isinstance(sub, list) and len(sub) == len(lst[0]) and get_shape(sub) == sub_shape for sub in lst):
-                raise ValueError("Вложенные списки имеют несогласованные размеры")
-            return [len(lst)] + sub_shape
 
-        def flatten(lst):
-            if not isinstance(lst, list):
-                return [lst]
-            res = []
-            for item in lst:
-                res.extend(flatten(item))
-            return res
+            if not obj:
+                return [0]
+
+            first_shape = get_shape(obj[0])
+
+            for item in obj[1:]:
+                if get_shape(item) != first_shape:
+                    raise ValueError("Вложенные списки имеют несогласованные размеры")
+
+            return [len(obj)] + first_shape
+
+        def flatten(obj):
+            if isinstance(obj, (list, tuple)):
+                res = []
+                for item in obj:
+                    res.extend(flatten(item))
+                return res
+            else:
+                return [float(obj)]
 
         shape = tuple(get_shape(nested))
         if not shape:
             shape = (0,)
+
         data = flatten(nested)
         return DenseTensor(shape, data=data)
 

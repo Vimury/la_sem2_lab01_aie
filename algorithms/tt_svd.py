@@ -9,6 +9,7 @@ import math
 from core.tt_tensor import TTTensor
 from core.dense_tensor import DenseTensor
 from processor_type.interface import BackendInterface
+from core.linalg import svd
 
 
 def tt_svd(
