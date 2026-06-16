@@ -22,6 +22,7 @@ import math
 from core.tt_tensor import TTTensor
 from core.dense_tensor import DenseTensor
 from processor_type.interface import BackendInterface
+from core.linalg import matmul
 
 
 Number = int | float
@@ -41,60 +42,53 @@ def tt_add(
     """
     new_cores = []
     d = tt1.order
+
+    if d == 1:
+        c1, c2 = tt1.cores[0], tt2.cores[0]
+        n = c1.shape[1]
+        new_data = [a + b for a, b in zip(c1.data, c2.data)]
+        return TTTensor([DenseTensor((1, n, 1), data=new_data)])
+
     for k in range(d):
         c1, c2 = tt1.cores[k], tt2.cores[k]
         r1_prev, n, r1_next = c1.shape
         r2_prev, _, r2_next = c2.shape
-        R1 = r1_prev + r2_prev
-        R2 = r1_next + r2_next
-
-        new_data = [0.0] * (R1 * n * R2)
 
         if k == 0:
+            R_next = r1_next + r2_next
+            new_data = [0.0] * (1 * n * R_next)
             for idx, val in enumerate(c1.data):
-                i = idx // (n * r1_next)
-                rem = idx % (n * r1_next)
-                j = rem // r1_next
-                l = rem % r1_next
-                new_data[i * n * R2 + j * R2 + l] = val
-
-            offset = r1_next
+                j, l = divmod(idx, r1_next)
+                new_data[j * R_next + l] = val
             for idx, val in enumerate(c2.data):
-                i = idx // (n * r2_next)
-                rem = idx % (n * r2_next)
-                j = rem // r2_next
-                l = rem % r2_next
-                new_data[i * n * R2 + j * R2 + (l + offset)] = val
+                j, l = divmod(idx, r2_next)
+                new_data[j * R_next + (l + r1_next)] = val
+            new_cores.append(DenseTensor((1, n, R_next), data=new_data))
 
         elif k == d - 1:
+            R_prev = r1_prev + r2_prev
+            new_data = [0.0] * (R_prev * n * 1)
             for idx, val in enumerate(c1.data):
-                i = idx // (n * 1)
-                j = idx % (n * 1)
-                new_data[i * n * 1 + j] = val
-
-            offset = r1_prev
+                i, j = divmod(idx, n)
+                new_data[i * n + j] = val
             for idx, val in enumerate(c2.data):
-                i = idx // (n * 1)
-                j = idx % (n * 1)
-                new_data[(i + offset) * n * 1 + j] = val
+                i, j = divmod(idx, n)
+                new_data[(i + r1_prev) * n + j] = val
+            new_cores.append(DenseTensor((R_prev, n, 1), data=new_data))
+
         else:
+            R_prev = r1_prev + r2_prev
+            R_next = r1_next + r2_next
+            new_data = [0.0] * (R_prev * n * R_next)
             for idx, val in enumerate(c1.data):
-                i = idx // (n * r1_next)
-                rem = idx % (n * r1_next)
-                j = rem // r1_next
-                l = rem % r1_next
-                new_data[i * n * R2 + j * R2 + l] = val
-
+                i, rem = divmod(idx, n * r1_next)
+                j, l = divmod(rem, r1_next)
+                new_data[i * n * R_next + j * R_next + l] = val
             for idx, val in enumerate(c2.data):
-                i2 = idx // (n * r2_next)
-                rem = idx % (n * r2_next)
-                j = rem // r2_next
-                l2 = rem % r2_next
-                new_i = i2 + r1_prev
-                new_l = l2 + r1_next
-                new_data[new_i * n * R2 + j * R2 + new_l] = val
-
-        new_cores.append(DenseTensor((R1, n, R2), data=new_data))
+                i2, rem = divmod(idx, n * r2_next)
+                j, l2 = divmod(rem, r2_next)
+                new_data[(i2 + r1_prev) * n * R_next + j * R_next + (l2 + r1_next)] = val
+            new_cores.append(DenseTensor((R_prev, n, R_next), data=new_data))
 
     return TTTensor(new_cores)
 
